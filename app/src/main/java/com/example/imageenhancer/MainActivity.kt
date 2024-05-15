@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                                 val path = context.getExternalFilesDir(null)!!.absolutePath
                                 val tempFile = File(path, "tempFileName.jpg")
                                 val fOut = FileOutputStream(tempFile)
-                                bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 50, fOut)
+                                bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, fOut)
                                 fOut.close()
                                 navController.navigate("enhanceScreen")
                             }
