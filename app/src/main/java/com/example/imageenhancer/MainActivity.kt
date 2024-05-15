@@ -28,7 +28,7 @@ import java.io.FileOutputStream
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    @RequiresApi(Build.VERSION_CODES.O)
+    @RequiresApi(Build.VERSION_CODES.R)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
                                 val path = context.getExternalFilesDir(null)!!.absolutePath
                                 val tempFile = File(path, "tempFileName.jpg")
                                 val fOut = FileOutputStream(tempFile)
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fOut)
+                                bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 50, fOut)
                                 fOut.close()
                                 navController.navigate("enhanceScreen")
                             }

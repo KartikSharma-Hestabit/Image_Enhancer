@@ -76,7 +76,7 @@ class CameraScreenViewModel @Inject constructor() : ViewModel() {
                 false
             )
 
-            return Bitmap.createScaledBitmap(bmp, 1000, 1000, false)
+            return Bitmap.createScaledBitmap(bmp, 800, 800, false)
 
         } else {
 
@@ -90,7 +90,7 @@ class CameraScreenViewModel @Inject constructor() : ViewModel() {
                 false
             )
 
-            return Bitmap.createScaledBitmap(bmp, 1000, 1000, false)
+            return Bitmap.createScaledBitmap(bmp, 800, 800, false)
         }
 
     }

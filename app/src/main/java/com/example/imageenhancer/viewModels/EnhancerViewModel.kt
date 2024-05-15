@@ -80,7 +80,7 @@ class EnhancerViewModel @Inject constructor() : ViewModel() {
 //        swinIR(context, output)
 
 
-        scuNet(context, output)
+        scuNetOriginal(context, output)
 
     }
 
@@ -107,29 +107,74 @@ class EnhancerViewModel @Inject constructor() : ViewModel() {
 
     }
 
-    suspend fun scuNet(context: Context, inputTensor: Tensor) = withContext(Dispatchers.IO) {
+    private suspend fun scuNet(context: Context, inputBitmap: Bitmap) =
+        withContext(Dispatchers.IO) {
 
-        _moduleFlow.value = Resource.Loading("Working on Denoising...")
+            /*_moduleFlow.value = Resource.Loading("Working on Denoising...")
+            val model = LiteModuleLoader.load(assetFilePath(context, "scunet_small.ptl"))
+            val inputData = preProcessing(inputBitmap)
+            val outputData = arrayListOf<Int>()
+            val bitmap =
+                Bitmap.createBitmap(inputBitmap.width, inputBitmap.height, Bitmap.Config.ARGB_8888)
+            // Process the image in chunks
+            for (buffer in inputData.indices step 1920000) {
+                val inputTensor = Tensor.fromBlob(
+                    inputData.copyOfRange(buffer, buffer + 1920000),
+                    longArrayOf(1, 3, inputBitmap.height.toLong(), inputBitmap.width.toLong())
+                )
+                val outputTensor = model.forward(IValue.from(inputTensor)).toTensor()
+                val outputArr = tensorToBitmap(outputTensor)
+                for (i in outputArr)
+                    outputData.add(i)
 
-        val model = LiteModuleLoader.load(assetFilePath(context, "scunet.ptl"))
-        val outputTensor = model.forward(IValue.from(inputTensor)).toTensor()
-        val outputBitmap = tensorToBitmap(outputTensor)
-        model.destroy()
-        _moduleFlow.value = Resource.Success(outputBitmap)
-        saveMediaToStorage(outputBitmap, context)
+                bitmap.setPixels(
+                    outputData.toIntArray(),
+                    0,
+                    inputBitmap.width,
+                    0,
+                    0,
+                    inputBitmap.width,
+                    inputBitmap.height
+                )
 
-        Log.d(
-            "moduleStats",
-            "scuNet Completed: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
-                Calendar.getInstance().get(Calendar.SECOND)
-            }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
-        )
+                model.destroy()
+                _moduleFlow.value = Resource.Success(bitmap)
+                saveMediaToStorage(bitmap, context)
 
-    }
+                Log.d(
+                    "moduleStats",
+                    "scuNet Completed: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
+                        Calendar.getInstance().get(Calendar.SECOND)
+                    }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
+                )
+    */
+        }
+
+    private suspend fun scuNetOriginal(context: Context, inputTensor: Tensor) =
+        withContext(Dispatchers.IO) {
+
+
+            val module =
+                LiteModuleLoader.load(assetFilePath(context, "scunet_small.ptl"))
+            val outputTensor = module.forward(IValue.from(inputTensor)).toTensor()
+            val outputBitmap = tensorToBitmap(outputTensor)
+
+            _moduleFlow.value = Resource.Success(outputBitmap)
+
+
+            Log.d(
+                "moduleStats",
+                "ScuNet Completed: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
+                    Calendar.getInstance().get(Calendar.SECOND)
+                }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
+            )
+
+        }
 
 }
 
-fun tensorToBitmap(
+
+private fun tensorToBitmap(
     outputTensor: Tensor,
     whiteBalance: FloatArray = floatArrayOf(1.0f, 1.0f, 1.0f),
     gamma: Float = 1.0f
@@ -189,11 +234,11 @@ fun tensorToBitmap(
 }
 
 // Extension function for gamma correction
-fun Float.gammaCorrect(gamma: Float): Float {
+private fun Float.gammaCorrect(gamma: Float): Float {
     return this.pow(gamma)
 }
 
-fun saveMediaToStorage(bitmap: Bitmap, context: Context) {
+private fun saveMediaToStorage(bitmap: Bitmap, context: Context) {
     //Generating a file name
     val filename = "${System.currentTimeMillis()}.png"
 

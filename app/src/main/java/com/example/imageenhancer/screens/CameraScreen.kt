@@ -268,22 +268,6 @@ private fun takePhoto(
                     ) else viewModel.getThreeByFourBitmap(bmp, matrix)
                 )
 
-                /*                val bitmap: Bitmap =
-                                    Bitmap.createScaledBitmap(image.toBitmap(), 700, 700, false)
-
-                                val bmp: Bitmap =
-                                    Bitmap.createBitmap(
-                                        bitmap,
-                                        0,
-                                        0,
-                                        bitmap.width,
-                                        bitmap.height,
-                                        matrix,
-                                        false
-                                    )
-
-                                onPhotoTaken(bmp)*/
-
             }
 
             override fun onError(exception: ImageCaptureException) {
