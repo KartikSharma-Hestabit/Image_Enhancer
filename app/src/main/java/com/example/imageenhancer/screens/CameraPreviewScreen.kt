@@ -21,11 +21,9 @@ import kotlin.coroutines.suspendCoroutine
 @Composable
 fun CameraPreviewScreen(
     controller: LifecycleCameraController,
-    modifier: Modifier = Modifier.fillMaxSize()
+    modifier: Modifier = Modifier
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    controller.setZoomRatio(1f)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
     AndroidView(
         factory = { context ->
@@ -34,7 +32,7 @@ fun CameraPreviewScreen(
                 controller.bindToLifecycle(lifecycleOwner)
             }
         },
-        modifier = modifier
+        modifier = Modifier.fillMaxSize()
     )
 
 }

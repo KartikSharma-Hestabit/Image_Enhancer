@@ -60,9 +60,10 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.imageenhancer.viewModels.CameraScreenViewModel
 import java.util.function.Consumer
+import kotlin.math.abs
 
 @Composable
-fun CameraScreen(onEnhanceClick: (Bitmap) -> Unit) {
+fun CameraScreen(onEnhanceClick: (Bitmap, Int, Int) -> Unit) {
 
     val context = LocalContext.current
 
@@ -86,23 +87,29 @@ fun CameraScreen(onEnhanceClick: (Bitmap) -> Unit) {
                     context.contentResolver,
                     uri
                 )
-                val finalBitmap: Bitmap
+                /*val finalBitmap: Bitmap
                 if (isSwitchChecked) {
                     finalBitmap = viewModel.getThreeByFourBitmap(bitmap)
                 } else {
                     finalBitmap = viewModel.getOneByOneBitmap(bitmap)
-                }
+                }*/
+                val paddingHeight = abs(768 - bitmap.height)
+
+                val paddingWidth = abs(1024 - bitmap.width)
+
+                val finalBitmap = viewModel.addPadding(bitmap, paddingWidth, paddingHeight)
+
 //                Bitmap.createBitmap(bitmap, 0, 0, 375, 500, null, false)
 
                 Log.d("imageBitmap", "onCreate: $finalBitmap")
-                onEnhanceClick(finalBitmap)
+                onEnhanceClick(finalBitmap, paddingWidth, paddingHeight)
 
             }
         }
 
 
 
-    Box(contentAlignment = Alignment.Center) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
 
         CameraPreviewScreen(controller = controller)
 
@@ -113,7 +120,7 @@ fun CameraScreen(onEnhanceClick: (Bitmap) -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
-            Text(
+            /*Text(
                 text = "Aspect Ratio", modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 20.dp, top = 20.dp),
@@ -143,7 +150,7 @@ fun CameraScreen(onEnhanceClick: (Bitmap) -> Unit) {
                     text = "3/4",
                     color = if (!isSwitchChecked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
                 )
-            }
+            }*/
 
             Spacer(modifier = Modifier.weight(1f))
 
@@ -181,9 +188,9 @@ fun CameraScreen(onEnhanceClick: (Bitmap) -> Unit) {
                             controller = controller,
                             viewModel = viewModel,
                             isSwitchChecked = isSwitchChecked
-                        ) {
-                            Log.d("imageBitmap", "onCreate: $it")
-                            onEnhanceClick(it)
+                        ) { bitmap, paddingWidth, paddingHeight ->
+//                            Log.d("imageBitmap", "onCreate: $it")
+                            onEnhanceClick(bitmap, paddingWidth, paddingHeight)
                         }
                     },
                     modifier = Modifier
@@ -227,7 +234,7 @@ private fun takePhoto(
     controller: LifecycleCameraController,
     viewModel: CameraScreenViewModel,
     isSwitchChecked: Boolean,
-    onPhotoTaken: (Bitmap) -> Unit
+    onPhotoTaken: (bitmap: Bitmap, paddingWidth: Int, paddingHeight: Int) -> Unit
 ) {
 
     controller.takePicture(
@@ -262,10 +269,14 @@ private fun takePhoto(
                     matrix.preRotate(rotation)
 
                 onPhotoTaken(
-                    if (!isSwitchChecked) viewModel.getOneByOneBitmap(
+                    /*if (!isSwitchChecked) viewModel.getOneByOneBitmap(
                         bmp,
                         matrix
-                    ) else viewModel.getThreeByFourBitmap(bmp, matrix)
+                    ) else viewModel.getThreeByFourBitmap(bmp, matrix)*/
+
+                    viewModel.addPadding(bmp, abs(1024 - bmp.width), abs(768 - bmp.height)),
+                    abs(1024 - bmp.width),
+                    abs(768 - bmp.height)
                 )
 
             }

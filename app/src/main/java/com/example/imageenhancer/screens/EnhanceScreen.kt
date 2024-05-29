@@ -60,10 +60,12 @@ import kotlin.concurrent.thread
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun EnhanceScreen(bitmap: Bitmap, onRetake: () -> Unit) {
+fun EnhanceScreen(bitmap: Bitmap, paddingWidth: Int, paddingHeight: Int, onRetake: () -> Unit) {
 
     val context = LocalContext.current
     val viewModel: EnhancerViewModel = hiltViewModel()
+    viewModel.paddingWidth = paddingWidth
+    viewModel.paddingHeight = paddingHeight
     val resultFlow = viewModel.moduleFlow.collectAsState()
     var isLoading by remember {
         mutableStateOf(false)
@@ -89,7 +91,7 @@ fun EnhanceScreen(bitmap: Bitmap, onRetake: () -> Unit) {
     if (onEnhance)
         LaunchedEffect(key1 = Unit) {
             withContext(Dispatchers.IO) {
-                viewModel.waternet(context, enhancedBitmap)
+                viewModel.waternet(enhancedBitmap)
             }
         }
 

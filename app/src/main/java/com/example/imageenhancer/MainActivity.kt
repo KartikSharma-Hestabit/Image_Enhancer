@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,12 +20,17 @@ import androidx.core.app.ActivityCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import com.example.imageenhancer.screens.CameraScreen
 import com.example.imageenhancer.screens.EnhanceScreen
 import com.example.imageenhancer.ui.theme.ImageEnhancerTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
 import java.io.File
 import java.io.FileOutputStream
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -58,24 +64,26 @@ class MainActivity : ComponentActivity() {
                     ) {
 
                         composable("cameraScreen") {
-                            CameraScreen { bitmap ->
+                            CameraScreen { bitmap, paddingWidth, paddingHeight ->
                                 val path = context.getExternalFilesDir(null)!!.absolutePath
                                 val tempFile = File(path, "tempFileName.jpg")
                                 val fOut = FileOutputStream(tempFile)
                                 bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, fOut)
                                 fOut.close()
-                                navController.navigate("enhanceScreen")
+                                navController.navigate(PaddingData(paddingWidth, paddingHeight))
                             }
                         }
 
-                        composable("enhanceScreen") {
+                        composable<PaddingData> {
                             val path = context.getExternalFilesDir(null)!!.absolutePath
                             val imagePath = "$path/tempFileName.jpg"
 
                             val image = BitmapFactory.decodeFile(imagePath)
                             File(imagePath).deleteOnExit() // Delete temp image
 
-                            EnhanceScreen(image) {
+                            val paddingData = it.toRoute<PaddingData>()
+
+                            EnhanceScreen(image, paddingData.paddingWidth, paddingData.paddingHeight) {
                                 navController.popBackStack()
                             }
                         }
@@ -85,7 +93,6 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
 
     private fun hasRequiredPermissions(): Boolean {
         return CAMERA_PERMISSION.all {
@@ -99,6 +106,8 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-
 }
+
+@Serializable
+data class PaddingData(val paddingWidth: Int, val paddingHeight: Int)
 

@@ -3,30 +3,34 @@ package com.example.imageenhancer.viewModels
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
-import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import com.example.imageenhancer.ml.Esrgan
 import com.example.imageenhancer.resources.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.pytorch.Device
 import org.pytorch.IValue
 import org.pytorch.LiteModuleLoader
 import org.pytorch.Module
+import org.pytorch.PyTorchAndroid
 import org.pytorch.Tensor
+import org.tensorflow.lite.support.image.TensorImage
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -38,14 +42,17 @@ import kotlin.math.roundToInt
 
 
 @HiltViewModel
-class EnhancerViewModel @Inject constructor() : ViewModel() {
+class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Context) :
+    ViewModel() {
 
-
+    var paddingWidth: Int = 0
+    var paddingHeight: Int = 0
     private val _moduleFlow = MutableStateFlow<Resource<Bitmap>?>(null)
     val moduleFlow: StateFlow<Resource<Bitmap>?> = _moduleFlow
+    val maxRowColum = 6
+    lateinit var model: Esrgan
 
-    @RequiresApi(Build.VERSION_CODES.O)
-    suspend fun waternet(context: Context, bitmap: Bitmap) = withContext(Dispatchers.IO) {
+    suspend fun waternet(bitmap: Bitmap) = withContext(Dispatchers.IO) {
 
         _moduleFlow.value = Resource.Loading("Working on Color Correction...")
 
@@ -56,18 +63,18 @@ class EnhancerViewModel @Inject constructor() : ViewModel() {
             }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
         )
 
-        val model: Module = LiteModuleLoader.load(assetFilePath(context, "waternet.ptl"))
-        val shape = longArrayOf(1, 3, bitmap.height.toLong(), bitmap.width.toLong())
+        var model: Module? = LiteModuleLoader.load(assetFilePath(context, "waternet.ptl"))
+        var shape = longArrayOf(1, 3, bitmap.height.toLong(), bitmap.width.toLong())
 
         val wbBitmap = whiteBalanceTransform(bitmap)
         val gammaBitmap = gammaCorrection(bitmap, 0.7f)
         val heBitmap = histogramEqualization(bitmap)
 
-        val rgbTensor = Tensor.fromBlob(bitmapToRgbNorm(bitmap), shape)
-        val wbTensor = Tensor.fromBlob(bitmapToRgbNorm(wbBitmap), shape)
-        val gcTensor = Tensor.fromBlob(bitmapToRgbNorm(gammaBitmap), shape)
-        val heTensor = Tensor.fromBlob(bitmapToRgbNorm(heBitmap), shape)
-        val output = model
+        var rgbTensor = Tensor.fromBlob(bitmapToRgbNorm(bitmap), shape)
+        var wbTensor = Tensor.fromBlob(bitmapToRgbNorm(wbBitmap), shape)
+        var gcTensor = Tensor.fromBlob(bitmapToRgbNorm(gammaBitmap), shape)
+        var heTensor = Tensor.fromBlob(bitmapToRgbNorm(heBitmap), shape)
+        val output = model!!
             .forward(
                 IValue.from(rgbTensor),
                 IValue.from(wbTensor),
@@ -76,11 +83,21 @@ class EnhancerViewModel @Inject constructor() : ViewModel() {
             )
             .toTensor()
 
+        wbBitmap.recycle()
+        gammaBitmap.recycle()
+        heBitmap.recycle()
+
+
         model.destroy()
+        System.runFinalization()
+        Runtime.getRuntime().gc()
+        System.gc()
+
 //        swinIR(context, output)
 
+//        delay(5000)
 
-        scuNetOriginal(context, output)
+        scuNetLarge(context, output)
 
     }
 
@@ -150,27 +167,164 @@ class EnhancerViewModel @Inject constructor() : ViewModel() {
     */
         }
 
-    private suspend fun scuNetOriginal(context: Context, inputTensor: Tensor) =
+    /*    private suspend fun scuNetOriginal(context: Context, inputTensor: Tensor) =
+            withContext(Dispatchers.IO) {
+
+
+                val module =
+                    LiteModuleLoader.load(assetFilePath(context, "scunet_small.ptl"))
+                val outputTensor = module.forward(IValue.from(inputTensor)).toTensor()
+                val outputBitmap = tensorToBitmap(outputTensor)
+
+                _moduleFlow.value = Resource.Success(outputBitmap)
+
+
+                Log.d(
+                    "moduleStats",
+                    "ScuNet Completed: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
+                        Calendar.getInstance().get(Calendar.SECOND)
+                    }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
+                )
+
+            }*/
+
+    private suspend fun scuNetLarge(context: Context, inputTensor: Tensor) =
         withContext(Dispatchers.IO) {
 
-
-            val module =
-                LiteModuleLoader.load(assetFilePath(context, "scunet_small.ptl"))
-            val outputTensor = module.forward(IValue.from(inputTensor)).toTensor()
-            val outputBitmap = tensorToBitmap(outputTensor)
-
-            _moduleFlow.value = Resource.Success(outputBitmap)
-
+            _moduleFlow.value = Resource.Loading("Working on Denoising")
 
             Log.d(
                 "moduleStats",
-                "ScuNet Completed: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
+                "SCUnet started: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
                     Calendar.getInstance().get(Calendar.SECOND)
                 }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
             )
 
+            var module: Module? =
+                LiteModuleLoader.load(assetFilePath(context, "scunet1024x768.ptl"))
+            var outputTensor = module!!.forward(IValue.from(inputTensor)).toTensor()
+            val outputBitmap = tensorToBitmap(outputTensor)
+
+//            _moduleFlow.value = Resource.Success(outputBitmap)
+
+            val newBitmap =
+                divideBitmap(removePadding(outputBitmap, paddingWidth, paddingHeight), maxRowColum)
+
+            outputBitmap.recycle()
+            outputTensor = null
+
+            module.destroy()
+            module = null
+            System.gc()
+
+//            delay(5000)
+
+
+            executeModel(newBitmap, context)
+
         }
 
+    private suspend fun executeModel(downsampled: List<Bitmap>, context: Context) =
+        withContext(Dispatchers.IO) {
+
+            _moduleFlow.value = Resource.Loading("Working on UpScaling...")
+
+
+            Log.d(
+                "moduleStats",
+                "ESRGAN started: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
+                    Calendar.getInstance().get(Calendar.SECOND)
+                }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
+            )
+            model = Esrgan.newInstance(context)
+
+
+            val quarterPoint = downsampled.size / 2
+            var part1 = downsampled.subList(0, quarterPoint)
+            var part2 = downsampled.subList(quarterPoint, downsampled.size)
+
+
+            println("Image Size: ${downsampled[0].width}, ${downsampled[0].height}")
+
+            var mergedBitmaps: List<Bitmap> = listOf()
+
+            runBlocking {
+                val deferred1 = async { processBitmaps(part1) }
+                val deferred2 = async { processBitmaps(part2) }
+
+                val mergedBitmapsPart1 = deferred1.await()
+                val mergedBitmapsPart2 = deferred2.await()
+
+                mergedBitmaps = mergedBitmapsPart1 + mergedBitmapsPart2
+            }
+
+
+            val mergedBitmap = mergeBitmaps(mergedBitmaps)
+
+
+            Log.d(
+                "moduleStats",
+                "ESRGAN stoped: ${Calendar.getInstance().get(Calendar.MINUTE)}:${
+                    Calendar.getInstance().get(Calendar.SECOND)
+                }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
+            )
+
+            _moduleFlow.value = Resource.Success(mergedBitmap)
+
+            // Releases model resources if no longer used.
+            model.close()
+
+
+            mergedBitmaps = emptyList()
+            part1 = emptyList()
+            part2 = emptyList()
+            System.gc()
+
+            saveMediaToStorage(mergedBitmap, context)
+        }
+
+
+    private suspend fun processBitmaps(bitmaps: List<Bitmap>): List<Bitmap> {
+        return bitmaps.map { bitmap ->
+            getOutput(bitmap, model)
+        }
+    }
+
+    private suspend fun getOutput(bitmap: Bitmap, model: Esrgan): Bitmap {
+        val originalImage = TensorImage.fromBitmap(bitmap)
+        val outputs = model.process(originalImage)
+        val enhancedImage = outputs.enhancedImageAsTensorImage
+        val enhancedImageBitmap = enhancedImage.bitmap
+        return enhancedImageBitmap
+    }
+
+    private fun mergeBitmaps(bitmaps: List<Bitmap>): Bitmap {
+        // Assuming all bitmaps have the same dimensions
+        val bitmapCount = bitmaps.size
+        require(bitmapCount == maxRowColum * maxRowColum) { "Expected 16 bitmaps, but got $bitmapCount" }
+
+        val width = bitmaps[0].width
+        val height = bitmaps[0].height
+
+        // Calculate the dimensions of the merged bitmap
+        val mergedWidth = width * maxRowColum
+        val mergedHeight = height * maxRowColum
+
+        val result = Bitmap.createBitmap(mergedWidth, mergedHeight, Bitmap.Config.ARGB_8888)
+
+        val canvas = Canvas(result)
+
+        for (i in 0 until maxRowColum) {
+            for (j in 0 until maxRowColum) {
+                val index = i * maxRowColum + j
+                val x = j * width
+                val y = i * height
+                canvas.drawBitmap(bitmaps[index], x.toFloat(), y.toFloat(), null)
+            }
+        }
+
+        return result
+    }
 }
 
 
@@ -498,4 +652,60 @@ fun bitmapToRgbNorm(bitmap: Bitmap): FloatArray {
         inputData[i + 2 * width * height] = blue
     }
     return inputData
+}
+
+fun divideBitmap(bitmap: Bitmap, maxRowColum: Int): List<Bitmap> {
+    val subImages = mutableListOf<Bitmap>()
+
+    val subimageWidth = 128
+    val subimageHeight = 128
+
+    val totalWidth = bitmap.width
+    val totalHeight = bitmap.height
+
+
+    for (i in 0 until maxRowColum) {
+        for (j in 0 until maxRowColum) {
+            val startX = j * subimageWidth
+            val startY = i * subimageHeight
+
+            val endX =
+                if (startX + subimageWidth > totalWidth) totalWidth else startX + subimageWidth
+            val endY =
+                if (startY + subimageHeight > totalHeight) totalHeight else startY + subimageHeight
+
+            val subImage =
+                Bitmap.createBitmap(endX - startX, endY - startY, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(subImage)
+            val srcRect = Rect(startX, startY, endX, endY)
+            val destRect = Rect(0, 0, endX - startX, endY - startY)
+            canvas.drawBitmap(bitmap, srcRect, destRect, null)
+            subImages.add(subImage)
+        }
+    }
+
+    return subImages
+}
+
+fun removePadding(paddedBitmap: Bitmap, paddingWidth: Int, paddingHeight: Int): Bitmap {
+    val paddedWidth = paddedBitmap.width
+    val paddedHeight = paddedBitmap.height
+
+    val newWidth = paddedWidth - paddingWidth
+    val newHeight = paddedHeight - paddingHeight
+
+    val croppedBitmap = Bitmap.createBitmap(newWidth, newHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(croppedBitmap)
+
+    // Calculate the source rectangle for the padded bitmap
+    val left = paddingWidth / 2
+    val top = paddingHeight / 2
+    val right = left + newWidth
+    val bottom = top + newHeight
+    val srcRect = Rect(left, top, right, bottom)
+
+    // Draw the padded bitmap onto the cropped bitmap
+    canvas.drawBitmap(paddedBitmap, srcRect, Rect(0, 0, newWidth, newHeight), null)
+
+    return croppedBitmap
 }
