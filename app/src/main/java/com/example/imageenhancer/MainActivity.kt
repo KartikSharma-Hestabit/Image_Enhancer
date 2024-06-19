@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        onTrimMemory(level = ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        onTrimMemory(level = ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
 
         setContent {
             ImageEnhancerTheme {
@@ -83,7 +83,13 @@ class MainActivity : ComponentActivity() {
 
                             val paddingData = it.toRoute<PaddingData>()
 
-                            EnhanceScreen(image, paddingData.paddingWidth, paddingData.paddingHeight) {
+                            EnhanceScreen(
+                                image,
+                                paddingData.paddingWidth,
+                                paddingData.paddingHeight,
+                                onTrimMemory = { onTrimMemory(level = ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) }
+
+                            ) {
                                 navController.popBackStack()
                             }
                         }

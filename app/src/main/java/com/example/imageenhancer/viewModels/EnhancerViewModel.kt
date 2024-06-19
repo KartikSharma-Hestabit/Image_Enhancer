@@ -1,5 +1,6 @@
 package com.example.imageenhancer.viewModels
 
+import android.content.ComponentCallbacks2
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -12,6 +13,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.core.content.OnTrimMemoryProvider
 import androidx.lifecycle.ViewModel
 import com.example.imageenhancer.ml.Esrgan
 import com.example.imageenhancer.resources.Resource
@@ -41,6 +43,9 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 
+data class ImageSize(val width: Int, val height: Int)
+
+
 @HiltViewModel
 class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Context) :
     ViewModel() {
@@ -52,7 +57,10 @@ class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Con
     val maxRowColum = 6
     lateinit var model: Esrgan
 
-    suspend fun waternet(bitmap: Bitmap) = withContext(Dispatchers.IO) {
+    private var row = 0
+    private var colum = 0
+    private var paddingAdded = Pair(0, 0)
+    suspend fun waternet(bitmap: Bitmap, onTrimMemory: () -> Unit) = withContext(Dispatchers.IO) {
 
         _moduleFlow.value = Resource.Loading("Working on Color Correction...")
 
@@ -87,11 +95,21 @@ class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Con
         gammaBitmap.recycle()
         heBitmap.recycle()
 
-
         model.destroy()
+        model = null
+        rgbTensor = null
+        wbTensor = null
+        gcTensor = null
+        heTensor = null
+
+        wbBitmap.recycle()
+        gammaBitmap.recycle()
+        heBitmap.recycle()
+
         System.runFinalization()
         Runtime.getRuntime().gc()
         System.gc()
+        onTrimMemory()
 
 //        swinIR(context, output)
 
@@ -207,8 +225,62 @@ class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Con
 
 //            _moduleFlow.value = Resource.Success(outputBitmap)
 
-            val newBitmap =
-                divideBitmap(removePadding(outputBitmap, paddingWidth, paddingHeight), maxRowColum)
+            val outputScuNetAndWaterNet = removePadding(outputBitmap, paddingWidth, paddingHeight)
+
+            val inputImage = ImageSize(
+                width = outputScuNetAndWaterNet.width,
+                height = outputScuNetAndWaterNet.height
+            )
+            val availableSizes = listOf(
+                ImageSize(width = 128, height = 128),
+                ImageSize(width = 256, height = 256),
+                ImageSize(width = 384, height = 384),
+                ImageSize(width = 512, height = 512),
+                ImageSize(width = 640, height = 640),
+                ImageSize(width = 768, height = 768),
+                ImageSize(width = 896, height = 896),
+                ImageSize(width = 1024, height = 1024)
+            )
+
+            val nearestSize = findNearestSize(
+                inputWidth = inputImage.width,
+                inputHeight = inputImage.height,
+                availableSizes = availableSizes
+            )
+
+            paddingAdded = calculatePadding(inputImage, nearestSize.second)
+
+            val addedPaddingBitmap = addPadding(
+                originalBitmap = outputScuNetAndWaterNet,
+                paddingWidth = paddingAdded.first,
+                paddingHeight = paddingAdded.second
+            )
+
+            row = addedPaddingBitmap.width / 128
+            colum = addedPaddingBitmap.height / 128
+
+            Log.d(
+                "Model Testing",
+                "Input Size: Width${inputImage.width}x${
+                    inputImage.height
+                }"
+            )
+
+            Log.d(
+                "Model Testing",
+                "Nearest Size: Width${nearestSize.second.width}x${
+                    nearestSize.second.height
+                }"
+            )
+
+            Log.d(
+                "Model Testing",
+                "Add Padding Size: Width${paddingAdded.first}x${
+                    paddingAdded.second
+                }"
+            )
+
+            val newBitmap = divideBitmap(addedPaddingBitmap, maxRow = row, maxColum = colum)
 
             outputBitmap.recycle()
             outputTensor = null
@@ -261,6 +333,8 @@ class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Con
 
             val mergedBitmap = mergeBitmaps(mergedBitmaps)
 
+            val removedPaddingFromMergedBitmap =
+                removePaddingRG(mergedBitmap, paddingAdded.first * 4, paddingAdded.second * 4)
 
             Log.d(
                 "moduleStats",
@@ -269,18 +343,17 @@ class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Con
                 }:${Calendar.getInstance().get(Calendar.MILLISECOND)}"
             )
 
-            _moduleFlow.value = Resource.Success(mergedBitmap)
+            _moduleFlow.value = Resource.Success(removedPaddingFromMergedBitmap)
 
             // Releases model resources if no longer used.
             model.close()
-
 
             mergedBitmaps = emptyList()
             part1 = emptyList()
             part2 = emptyList()
             System.gc()
 
-            saveMediaToStorage(mergedBitmap, context)
+            saveMediaToStorage(removedPaddingFromMergedBitmap, context)
         }
 
 
@@ -301,28 +374,22 @@ class EnhancerViewModel @Inject constructor(@ApplicationContext val context: Con
     private fun mergeBitmaps(bitmaps: List<Bitmap>): Bitmap {
         // Assuming all bitmaps have the same dimensions
         val bitmapCount = bitmaps.size
-        require(bitmapCount == maxRowColum * maxRowColum) { "Expected 16 bitmaps, but got $bitmapCount" }
-
+        require(bitmapCount == row * colum) { "Expected ${row * colum} bitmaps, but got $bitmapCount" }
         val width = bitmaps[0].width
         val height = bitmaps[0].height
-
         // Calculate the dimensions of the merged bitmap
-        val mergedWidth = width * maxRowColum
-        val mergedHeight = height * maxRowColum
-
+        val mergedWidth = width * row
+        val mergedHeight = height * colum
         val result = Bitmap.createBitmap(mergedWidth, mergedHeight, Bitmap.Config.ARGB_8888)
-
         val canvas = Canvas(result)
-
-        for (i in 0 until maxRowColum) {
-            for (j in 0 until maxRowColum) {
-                val index = i * maxRowColum + j
+        for (i in 0 until colum) {
+            for (j in 0 until row) {
+                val index = i * row + j
                 val x = j * width
                 val y = i * height
                 canvas.drawBitmap(bitmaps[index], x.toFloat(), y.toFloat(), null)
             }
         }
-
         return result
     }
 }
@@ -654,26 +721,21 @@ fun bitmapToRgbNorm(bitmap: Bitmap): FloatArray {
     return inputData
 }
 
-fun divideBitmap(bitmap: Bitmap, maxRowColum: Int): List<Bitmap> {
+fun divideBitmap(bitmap: Bitmap, maxRow: Int, maxColum: Int): List<Bitmap> {
     val subImages = mutableListOf<Bitmap>()
-
     val subimageWidth = 128
     val subimageHeight = 128
-
     val totalWidth = bitmap.width
     val totalHeight = bitmap.height
 
-
-    for (i in 0 until maxRowColum) {
-        for (j in 0 until maxRowColum) {
+    for (i in 0 until maxColum) {
+        for (j in 0 until maxRow) {
             val startX = j * subimageWidth
             val startY = i * subimageHeight
-
             val endX =
                 if (startX + subimageWidth > totalWidth) totalWidth else startX + subimageWidth
             val endY =
                 if (startY + subimageHeight > totalHeight) totalHeight else startY + subimageHeight
-
             val subImage =
                 Bitmap.createBitmap(endX - startX, endY - startY, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(subImage)
@@ -683,9 +745,9 @@ fun divideBitmap(bitmap: Bitmap, maxRowColum: Int): List<Bitmap> {
             subImages.add(subImage)
         }
     }
-
     return subImages
 }
+
 
 fun removePadding(paddedBitmap: Bitmap, paddingWidth: Int, paddingHeight: Int): Bitmap {
     val paddedWidth = paddedBitmap.width
@@ -709,3 +771,82 @@ fun removePadding(paddedBitmap: Bitmap, paddingWidth: Int, paddingHeight: Int): 
 
     return croppedBitmap
 }
+
+private fun removePaddingRG(paddedBitmap: Bitmap, paddingWidth: Int, paddingHeight: Int): Bitmap {
+    val paddedWidth = paddedBitmap.width
+    val paddedHeight = paddedBitmap.height
+
+    val newWidth = paddedWidth - paddingWidth
+    val newHeight = paddedHeight - paddingHeight
+
+    val croppedBitmap = Bitmap.createBitmap(newWidth, newHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(croppedBitmap)
+
+    // Calculate the source rectangle for the padded bitmap
+    val left = paddingWidth
+    val top = paddingHeight
+    val right = left + newWidth
+    val bottom = top + newHeight
+    val srcRect = Rect(left, top, right, bottom)
+
+    // Draw the padded bitmap onto the cropped bitmap
+    canvas.drawBitmap(paddedBitmap, srcRect, Rect(0, 0, newWidth, newHeight), null)
+
+    return croppedBitmap
+}
+
+
+private fun findNearestSize(
+    inputWidth: Int,
+    inputHeight: Int,
+    availableSizes: List<ImageSize>
+): Pair<Boolean, ImageSize> {
+    // Check if the input size matches the first available size exactly
+    if (inputWidth == availableSizes.first().width && inputHeight == availableSizes.first().height) {
+        return false to availableSizes.first()
+    }
+
+    // Iterate through the available sizes to find the next nearest size
+    for (size in availableSizes) {
+        if (inputWidth <= size.width && inputHeight <= size.height) {
+            return true to size
+        }
+    }
+
+    // If no suitable size is found, return the first size by default (shouldn't happen with valid inputs)
+    return true to availableSizes.first()
+}
+
+
+private fun calculatePadding(inputSize: ImageSize, nearestSize: ImageSize): Pair<Int, Int> {
+    val paddingWidth = nearestSize.width - inputSize.width
+    val paddingHeight = nearestSize.height - inputSize.height
+    return Pair(paddingWidth, paddingHeight)
+}
+
+private fun addPadding(originalBitmap: Bitmap, paddingWidth: Int, paddingHeight: Int): Bitmap {
+    val originalWidth = originalBitmap.width
+    val originalHeight = originalBitmap.height
+
+    val newWidth = originalWidth + paddingWidth
+    val newHeight = originalHeight + paddingHeight
+
+    val paddedBitmap = Bitmap.createBitmap(newWidth, newHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(paddedBitmap)
+
+    // Clear the canvas with a default background color (e.g., white)
+    canvas.drawColor(android.graphics.Color.WHITE)
+
+    // Calculate the destination rectangle for the original bitmap
+    val left = paddingWidth
+    val top = paddingHeight
+    val right = left + originalWidth
+    val bottom = top + originalHeight
+    val destRect = Rect(left, top, right, bottom)
+
+    // Draw the original bitmap onto the padded bitmap
+    canvas.drawBitmap(originalBitmap, null, destRect, null)
+
+    return paddedBitmap
+}
+
